@@ -10,7 +10,7 @@ import random
 import numpy as np
 
 
-source_manager = SourceManager("./field_system_calsource")
+source_manager = SourceManager()
 options = source_manager.source_names_list
 sourcename = ""
 NUM_COLORS = len(options)
