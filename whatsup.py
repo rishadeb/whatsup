@@ -11,7 +11,7 @@ import numpy as np
 
 
 source_manager = SourceManager()
-options = source_manager.source_names_list
+options = source_manager.sources.keys()
 sourcename = ""
 NUM_COLORS = len(options)
 colors = np.random.rand(len(options))
@@ -26,7 +26,6 @@ num_of_hours.set(10)
 time_step_size = tkinter.IntVar()
 time_step_size.set(30)
 source_clicked = tkinter.StringVar()
-source_clicked.set("Cyg A")
 plot_selected = tkinter.StringVar()
 plot_selected.set("Az/El")
 
@@ -80,7 +79,7 @@ def update_graph(*args):
         ax.set_xlabel("Time")
     if plot_selected.get() == "All":
         ax.set_prop_cycle(color=[cm(1.0 * i / NUM_COLORS) for i in range(NUM_COLORS)])
-        for i in source_manager.source_names_list:
+        for i in source_manager.sources.keys():
             answer = source_manager.check_trajectory(
                 num_of_hours.get() * 60 * 60, time_step_size.get() * 60, i
             )
