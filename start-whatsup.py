@@ -1,5 +1,5 @@
 import tkinter
-from check_path import WhatsUp
+from whatsup import WhatsUp
 import katpoint
 from matplotlib.backends.backend_tkagg import (
     FigureCanvasTkAgg, NavigationToolbar2Tk)
@@ -35,7 +35,6 @@ plot_selected = tkinter.StringVar()
 plot_selected.set("Az/El")
 
 # configure the grid
-
 root.columnconfigure(0, weight=10)
 #root.columnconfigure(1, weight=2)
 root.columnconfigure(3, weight=10)
@@ -85,8 +84,6 @@ def update_graph(*args):
             ax.scatter(answer[1], answer[2], alpha=0.7)
             ax.annotate(i, (random.choice(answer[1]),random.choice(answer[2])), size=6 )
             legends.append(i)
-
-
         ax.legend(legends, bbox_to_anchor=(1.0, 1.15), prop={'size': 6})
         ax.axhline(0,color='black') # y = 0
     canvas.draw()

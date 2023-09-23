@@ -19,7 +19,7 @@ class WhatsUp():
         self.filename = filename
         self.read_csv()
 
-    def read_csv(self): # ./sources_for_2019_campaign
+    def read_csv(self):
         with open(self.filename, 'r') as file:
             csvreader = csv.reader(file, delimiter=',')
             for row in csvreader:
@@ -52,14 +52,5 @@ class WhatsUp():
             azim = katpoint.rad2deg(target.azel(c)[0])
             azim_list.append(azim)
             elev_list.append(elev)
-            #print('azimuth = ', azim ,', elevation = ', elev, "|", katpoint.Timestamp(c).to_string())
         return t, azim_list, elev_list
-# %%
-#a = WhatsUp('./sources_for_2019_campaign')
-#a.check_trajectory(5*60*60,1800,'Cyg A')
-# %%
-# %%
-#yo = WhatsUp('./sources_for_2019_campaign')
-#yo.check_trajectory(5*60*60,1800,'Cyg A')
 
-# %%
