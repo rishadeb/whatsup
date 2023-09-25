@@ -1,4 +1,4 @@
-katpoint
 matplotlib
 tkinter
 astropy
+astroplan

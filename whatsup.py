@@ -55,7 +55,7 @@ def update_graph(*args):
     step_size = time_step_size.get() if (time_step_size.get() > 0) else 10
     source_name = source_clicked.get()
 
-    result = source_manager.check_trajectory(hours * 60 * 60, step_size * 60, source_name)
+    result = source_manager.check_trajectory(hours, step_size, source_name)
     ra.set(source_manager.get_ra_dec(source_clicked.get())[0])
     dec.set(source_manager.get_ra_dec(source_clicked.get())[1])
 
@@ -70,18 +70,18 @@ def update_graph(*args):
         ax.set_xlabel("Azimuth (Degrees)")
         ax.set_ylabel("Elevation (Degrees)")
     if plot_selected.get() == "Az/time":
-        ax.scatter([datetime.fromtimestamp(x) for x in time_list], azimuth_list)
+        ax.scatter(time_list, azimuth_list)
         ax.set_ylabel("Azimuth (Degrees)")
         ax.set_xlabel("Time")
     if plot_selected.get() == "El/time":
-        ax.scatter([datetime.fromtimestamp(x) for x in time_list], elevation_list)
+        ax.scatter(time_list, elevation_list)
         ax.set_ylabel("Elevation (Degrees)")
         ax.set_xlabel("Time")
     if plot_selected.get() == "All":
         ax.set_prop_cycle(color=[cm(1.0 * i / NUM_COLORS) for i in range(NUM_COLORS)])
         for i in source_manager.sources.keys():
             answer = source_manager.check_trajectory(
-                num_of_hours.get() * 60 * 60, time_step_size.get() * 60, i
+                num_of_hours.get(), time_step_size.get(), i
             )
             ax.scatter(answer[1], answer[2], alpha=0.7)
             ax.annotate(i, (random.choice(answer[1]), random.choice(answer[2])), size=6)
@@ -97,13 +97,11 @@ def update_graph(*args):
             + " \t elevation = "
             + str(result[2][x])
             + " \t "
-            + katpoint.Timestamp(result[0][x]).to_string()
+            + result[0][x].strftime("%Y-%m-%d %H:%M:%S")
             + "\n"
         )
     az_el_textbox.insert(tkinter.END, Fact)
 
-
-result = source_manager.check_trajectory(num_of_hours.get() * 60 * 60, 1800, source_clicked.get())
 Fact = ""
 
 selection_frame = tkinter.Frame(root)

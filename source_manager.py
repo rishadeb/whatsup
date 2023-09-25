@@ -1,9 +1,18 @@
-# %%
-import katpoint
+import astropy.units as u
+
+from astroplan import Observer
+from astropy.coordinates import SkyCoord, AltAz, EarthLocation, FK5
+from astropy.time import Time
+from astroplan.plots import plot_sky, plot_sky_24hr
+
 import numpy as np
 import csv
 import configparser
+
 import datetime
+from datetime import datetime, timezone
+
+import matplotlib.pyplot as plt
 
 from dataclasses import dataclass
 
@@ -22,18 +31,22 @@ class SourceManager:
         self.location_name = ""
         self.latitude = 0
         self.longitude = 0
-        self.height = 0
+        self.altitude = 0
         self.filename = ""
         self.config = configparser.ConfigParser()
         self.config_loader()
         self.read_csv()
+        self.location = EarthLocation.from_geodetic(lat=self.latitude * u.deg,
+                                      lon=self.longitude * u.deg,
+                                      height=self.altitude * u.m)
+        self.observer = Observer(location=self.location, name=self.location_name)
 
     def config_loader(self):
         self.config.read("location.ini")
         self.location_name = self.config["LOCATION"]["name"]
-        self.latitude = self.config["LOCATION"]["latitude"]
-        self.longitude = self.config["LOCATION"]["longitude"]
-        self.altitude = self.config["LOCATION"]["altitude"]
+        self.latitude = self.config.getfloat("LOCATION", "latitude")
+        self.longitude = self.config.getfloat("LOCATION", "longitude")
+        self.altitude = self.config.getfloat("LOCATION", "altitude")
 
     def read_csv(self, filename="sources.csv"):
         # Open the csv, filter comments and strip spaces and tabs
@@ -59,19 +72,15 @@ class SourceManager:
         datetime_object = datetime.datetime.now()
         return datetime_object.strftime("%Y-%m-%d %H:%M:%S")
 
-    def check_trajectory(self, duration, timeResolution, source_name):
-        azim_list = []
-        elev_list = []
-        start_time = SourceManager.get_current_time()
+    def check_trajectory(self, duration, time_resolution, source_name):
+        observe_time = Time(datetime.now(), format="datetime")
         ra_dec = self.get_ra_dec(source_name)
-        target = katpoint.construct_radec_target(ra_dec[0], ra_dec[1])
-        target.antenna = katpoint.Antenna(
-            self.location_name, self.latitude, self.longitude, self.altitude
-        )
-        t = katpoint.Timestamp(start_time).secs + np.arange(0, duration, timeResolution)
-        for c in t:
-            elev = katpoint.rad2deg(target.azel(c)[1])
-            azim = katpoint.rad2deg(target.azel(c)[0])
-            azim_list.append(azim)
-            elev_list.append(elev)
-        return t, azim_list, elev_list
+        target = SkyCoord(ra_dec[0], ra_dec[1], frame=FK5(equinox=Time("J2000")),
+                          unit=(u.hourangle, u.deg)
+                          )
+        observe_time_span = observe_time + np.arange(0, duration, time_resolution/60) * u.hour
+        time = observe_time_span.to_datetime()
+        # Coordinate transformations
+        altaz = AltAz(location=self.location, obstime=observe_time_span)
+        target_az_el = target.transform_to(altaz)
+        return time, target_az_el.az.degree, target_az_el.alt.degree
