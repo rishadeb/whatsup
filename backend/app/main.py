@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -11,6 +11,7 @@ from source_manager import ObserverLocation, SourceManager
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 FRONTEND_DIR = ROOT_DIR / "frontend"
+FRONTEND_DIST_DIR = FRONTEND_DIR / "dist"
 
 app = FastAPI(title="WhatsUp Astronomy API")
 source_manager = SourceManager()
@@ -46,6 +47,12 @@ class AllTrajectoriesRequest(BaseModel):
     start_time: datetime | None = None
 
 
+class VisibilityRequest(BaseModel):
+    source_name: str
+    location: LocationPayload | None = None
+    at_time: datetime | None = None
+
+
 def location_payload(location: ObserverLocation) -> dict:
     return {
         "name": location.name,
@@ -64,6 +71,8 @@ def request_location(location: LocationPayload | None) -> ObserverLocation:
 def serialise_points(times, azimuth, elevation) -> list[dict]:
     points = []
     for timestamp, azimuth_value, elevation_value in zip(times, azimuth, elevation):
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
         points.append(
             {
                 "time": timestamp.isoformat(),
@@ -76,6 +85,9 @@ def serialise_points(times, azimuth, elevation) -> list[dict]:
 
 @app.get("/")
 def index():
+    index_path = FRONTEND_DIST_DIR / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
     return FileResponse(FRONTEND_DIR / "index.html")
 
 
@@ -121,6 +133,37 @@ def trajectory(request: TrajectoryRequest):
     }
 
 
+@app.post("/api/visibility")
+def visibility(request: VisibilityRequest):
+    location = request_location(request.location)
+
+    try:
+        times, azimuth, elevation = source_manager.check_trajectory_at_location(
+            1 / 60,
+            1,
+            request.source_name,
+            location,
+            start_time=request.at_time,
+        )
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail=f"Unknown source: {error.args[0]}")
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+
+    elevation_value = float(elevation[0])
+    return {
+        "source_name": request.source_name,
+        "time": (
+            times[0].replace(tzinfo=timezone.utc)
+            if times[0].tzinfo is None
+            else times[0]
+        ).isoformat(),
+        "azimuth": float(azimuth[0]),
+        "elevation": elevation_value,
+        "status": "visible" if elevation_value >= 0 else "below horizon",
+    }
+
+
 @app.post("/api/trajectories")
 def trajectories(request: AllTrajectoriesRequest):
     location = request_location(request.location)
@@ -152,5 +195,5 @@ def trajectories(request: AllTrajectoriesRequest):
         "datasets": datasets,
     }
 
-
-app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+if (FRONTEND_DIST_DIR / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST_DIR / "assets"), name="assets")
