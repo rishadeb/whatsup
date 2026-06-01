@@ -1,20 +1,30 @@
+import os
+from pathlib import Path
+
+ASTROPY_CACHE_DIR = Path(__file__).resolve().parent / ".cache"
+ASTROPY_CACHE_DIR.mkdir(exist_ok=True)
+os.environ.setdefault("XDG_CACHE_HOME", str(ASTROPY_CACHE_DIR))
+
 import astropy.units as u
 
 from astroplan import Observer
+from astropy.config.paths import set_temp_cache
 from astropy.coordinates import SkyCoord, AltAz, EarthLocation, FK5
 from astropy.time import Time
-from astroplan.plots import plot_sky, plot_sky_24hr
+from astropy.utils import iers
 
 import numpy as np
 import csv
 import configparser
 
-import datetime
 from datetime import datetime, timezone
 
-import matplotlib.pyplot as plt
-
 from dataclasses import dataclass
+
+
+iers.conf.auto_download = False
+iers.conf.auto_max_age = None
+set_temp_cache(ASTROPY_CACHE_DIR, delete=False)
 
 
 @dataclass
@@ -24,42 +34,51 @@ class AstroSource:
     dec: str
 
 
+@dataclass
+class ObserverLocation:
+    name: str
+    latitude: float
+    longitude: float
+    altitude: float
+
+
 class SourceManager:
-    def __init__(self):
+    def __init__(self, location: ObserverLocation | None = None):
         self.sources = {}
         self.source_names = {}
-        self.location_name = ""
-        self.latitude = 0
-        self.longitude = 0
-        self.altitude = 0
         self.filename = ""
         self.config = configparser.ConfigParser()
-        self.config_loader()
+        self.location_config = location or self.config_loader()
         self.read_csv()
-        self.location = EarthLocation.from_geodetic(lat=self.latitude * u.deg,
-                                      lon=self.longitude * u.deg,
-                                      height=self.altitude * u.m)
-        self.observer = Observer(location=self.location, name=self.location_name)
+        self.location = self._earth_location(self.location_config)
+        self.observer = Observer(location=self.location, name=self.location_config.name)
 
     def config_loader(self):
-        self.config.read("location.ini")
-        self.location_name = self.config["LOCATION"]["name"]
-        self.latitude = self.config.getfloat("LOCATION", "latitude")
-        self.longitude = self.config.getfloat("LOCATION", "longitude")
-        self.altitude = self.config.getfloat("LOCATION", "altitude")
+        self.config.read(Path(__file__).with_name("location.ini"))
+        return ObserverLocation(
+            name=self.config["LOCATION"]["name"],
+            latitude=self.config.getfloat("LOCATION", "latitude"),
+            longitude=self.config.getfloat("LOCATION", "longitude"),
+            altitude=self.config.getfloat("LOCATION", "altitude"),
+        )
 
     def read_csv(self, filename="sources.csv"):
         # Open the csv, filter comments and strip spaces and tabs
         try:
-            with open(filename, "r") as file:
-                csvreader = csv.reader(filter(lambda row: row[0] != "#", file))
+            path = Path(filename)
+            if not path.is_absolute():
+                path = Path(__file__).with_name(filename)
+            with path.open("r") as file:
+                csvreader = csv.reader(
+                    row for row in file if row.strip() and not row.lstrip().startswith("#")
+                )
                 for row in csvreader:
                     stripped_row = [cell.strip() for cell in row]
                     self.sources[stripped_row[0]] = AstroSource(
                         stripped_row[0], stripped_row[2], stripped_row[3]
                     )
         except Exception as e:
-            print("{e}")
+            print(e)
 
     def get_ra_dec(self, source_name):
         source = self.sources[source_name]
@@ -67,13 +86,42 @@ class SourceManager:
         dec = source.dec
         return ra.strip(), dec.strip()
 
-    def get_current_time():
-        # '2022-12-07 07:00:00'
-        datetime_object = datetime.datetime.now()
-        return datetime_object.strftime("%Y-%m-%d %H:%M:%S")
+    def get_sources(self):
+        return [
+            {"name": source.source_name, "ra": source.ra.strip(), "dec": source.dec.strip()}
+            for source in self.sources.values()
+        ]
 
-    def check_trajectory(self, duration, time_resolution, source_name):
-        observe_time = Time(datetime.now(), format="datetime")
+    def get_location(self):
+        return self.location_config
+
+    def _earth_location(self, location):
+        return EarthLocation.from_geodetic(
+            lat=location.latitude * u.deg,
+            lon=location.longitude * u.deg,
+            height=location.altitude * u.m,
+        )
+
+    def _trajectory_for_location(
+        self,
+        duration,
+        time_resolution,
+        source_name,
+        location,
+        start_time=None,
+    ):
+        if source_name not in self.sources:
+            raise KeyError(source_name)
+
+        if duration <= 0:
+            raise ValueError("duration must be greater than zero")
+        if time_resolution <= 0:
+            raise ValueError("time_resolution must be greater than zero")
+
+        if start_time is None:
+            start_time = datetime.now(timezone.utc)
+        observe_time = Time(start_time, format="datetime")
+
         ra_dec = self.get_ra_dec(source_name)
         target = SkyCoord(ra_dec[0], ra_dec[1], frame=FK5(equinox=Time("J2000")),
                           unit=(u.hourangle, u.deg)
@@ -81,6 +129,48 @@ class SourceManager:
         observe_time_span = observe_time + np.arange(0, duration, time_resolution/60) * u.hour
         time = observe_time_span.to_datetime()
         # Coordinate transformations
-        altaz = AltAz(location=self.location, obstime=observe_time_span)
+        altaz = AltAz(location=self._earth_location(location), obstime=observe_time_span)
         target_az_el = target.transform_to(altaz)
         return time, target_az_el.az.degree, target_az_el.alt.degree
+
+    def check_trajectory(self, duration, time_resolution, source_name):
+        return self._trajectory_for_location(
+            duration,
+            time_resolution,
+            source_name,
+            self.location_config,
+        )
+
+    def check_trajectory_at_location(
+        self,
+        duration,
+        time_resolution,
+        source_name,
+        location,
+        start_time=None,
+    ):
+        return self._trajectory_for_location(
+            duration,
+            time_resolution,
+            source_name,
+            location,
+            start_time=start_time,
+        )
+
+    def check_all_trajectories_at_location(
+        self,
+        duration,
+        time_resolution,
+        location,
+        start_time=None,
+    ):
+        return {
+            source_name: self.check_trajectory_at_location(
+                duration,
+                time_resolution,
+                source_name,
+                location,
+                start_time=start_time,
+            )
+            for source_name in self.sources.keys()
+        }

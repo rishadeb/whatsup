@@ -1,3 +1,4 @@
 *ven/
 __pycache__/
+.cache/
 .vscode/

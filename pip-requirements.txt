@@ -1,4 +1,5 @@
 matplotlib
-tkinter
 astropy
 astroplan
+fastapi
+uvicorn[standard]
