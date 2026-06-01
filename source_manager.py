@@ -1,8 +1,11 @@
 import os
+import tempfile
 from pathlib import Path
 
-ASTROPY_CACHE_DIR = Path(__file__).resolve().parent / ".cache"
-ASTROPY_CACHE_DIR.mkdir(exist_ok=True)
+ASTROPY_CACHE_DIR = Path(
+    os.environ.get("WHATSUP_CACHE_DIR", Path(tempfile.gettempdir()) / "whatsup-astropy-cache")
+)
+ASTROPY_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("XDG_CACHE_HOME", str(ASTROPY_CACHE_DIR))
 
 import astropy.units as u
@@ -40,6 +43,7 @@ class ObserverLocation:
     latitude: float
     longitude: float
     altitude: float
+    timezone: str = "UTC"
 
 
 class SourceManager:
@@ -60,6 +64,7 @@ class SourceManager:
             latitude=self.config.getfloat("LOCATION", "latitude"),
             longitude=self.config.getfloat("LOCATION", "longitude"),
             altitude=self.config.getfloat("LOCATION", "altitude"),
+            timezone=self.config["LOCATION"].get("timezone", "UTC"),
         )
 
     def read_csv(self, filename="sources.csv"):
@@ -102,6 +107,36 @@ class SourceManager:
             height=location.altitude * u.m,
         )
 
+    def _trajectory_for_source(
+        self,
+        duration,
+        time_resolution,
+        source,
+        location,
+        start_time=None,
+    ):
+        if duration <= 0:
+            raise ValueError("duration must be greater than zero")
+        if time_resolution <= 0:
+            raise ValueError("time_resolution must be greater than zero")
+
+        if start_time is None:
+            start_time = datetime.now(timezone.utc)
+        observe_time = Time(start_time, format="datetime")
+
+        target = SkyCoord(
+            source.ra.strip(),
+            source.dec.strip(),
+            frame=FK5(equinox=Time("J2000")),
+            unit=(u.hourangle, u.deg),
+        )
+        observe_time_span = observe_time + np.arange(0, duration, time_resolution/60) * u.hour
+        time = observe_time_span.to_datetime()
+        # Coordinate transformations
+        altaz = AltAz(location=self._earth_location(location), obstime=observe_time_span)
+        target_az_el = target.transform_to(altaz)
+        return time, target_az_el.az.degree, target_az_el.alt.degree
+
     def _trajectory_for_location(
         self,
         duration,
@@ -113,25 +148,13 @@ class SourceManager:
         if source_name not in self.sources:
             raise KeyError(source_name)
 
-        if duration <= 0:
-            raise ValueError("duration must be greater than zero")
-        if time_resolution <= 0:
-            raise ValueError("time_resolution must be greater than zero")
-
-        if start_time is None:
-            start_time = datetime.now(timezone.utc)
-        observe_time = Time(start_time, format="datetime")
-
-        ra_dec = self.get_ra_dec(source_name)
-        target = SkyCoord(ra_dec[0], ra_dec[1], frame=FK5(equinox=Time("J2000")),
-                          unit=(u.hourangle, u.deg)
-                          )
-        observe_time_span = observe_time + np.arange(0, duration, time_resolution/60) * u.hour
-        time = observe_time_span.to_datetime()
-        # Coordinate transformations
-        altaz = AltAz(location=self._earth_location(location), obstime=observe_time_span)
-        target_az_el = target.transform_to(altaz)
-        return time, target_az_el.az.degree, target_az_el.alt.degree
+        return self._trajectory_for_source(
+            duration,
+            time_resolution,
+            self.sources[source_name],
+            location,
+            start_time=start_time,
+        )
 
     def check_trajectory(self, duration, time_resolution, source_name):
         return self._trajectory_for_location(
@@ -153,6 +176,24 @@ class SourceManager:
             duration,
             time_resolution,
             source_name,
+            location,
+            start_time=start_time,
+        )
+
+    def check_trajectory_for_coordinates(
+        self,
+        duration,
+        time_resolution,
+        source_name,
+        ra,
+        dec,
+        location,
+        start_time=None,
+    ):
+        return self._trajectory_for_source(
+            duration,
+            time_resolution,
+            AstroSource(source_name, ra, dec),
             location,
             start_time=start_time,
         )

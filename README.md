@@ -52,6 +52,28 @@ http://127.0.0.1:8000/
 
 The browser UI is a Vite React app using Tailwind CSS and Chart.js.
 
+## Deploy to Vercel
+
+The repo includes Vercel configuration for deploying the FastAPI app as a Python
+function and the React UI as static Vite output.
+
+Vercel uses:
+
+- `api/index.py` as the Python serverless entrypoint.
+- `requirements.txt` for deployment Python dependencies.
+- `vercel.json` to build `frontend/dist`, route `/api/*` to FastAPI, and serve the
+  React app for all other paths.
+- `.python-version` to request Python 3.12.
+
+The configured Vercel build command is:
+
+```bash
+npm --prefix frontend ci && npm --prefix frontend run build
+```
+
+Deploy from the project root with the Vercel CLI or connect the repository in the
+Vercel dashboard.
+
 ## Location
 
 The default observing location comes from `location.ini`.

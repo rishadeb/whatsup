@@ -2,14 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Chart,
   LinearScale,
+  LineController,
   LineElement,
   PointElement,
-  ScatterController,
   Tooltip,
   Legend,
 } from "chart.js";
 
-Chart.register(LinearScale, LineElement, PointElement, ScatterController, Tooltip, Legend);
+Chart.register(LinearScale, LineController, LineElement, PointElement, Tooltip, Legend);
 
 const STORAGE_KEY = "whatsup.location";
 const MAPS_API_KEY_STORAGE_KEY = "whatsup.googleMapsApiKey";
@@ -31,10 +31,41 @@ const palette = [
   "#1d4ed8",
 ];
 
+const CATALOG_PROVIDERS = [
+  { value: "simbad", label: "SIMBAD" },
+  { value: "vizier", label: "VizieR" },
+];
+const DEFAULT_TIMEZONE = "UTC";
+const FALLBACK_TIMEZONES = [
+  "UTC",
+  "Africa/Accra",
+  "Africa/Johannesburg",
+  "Africa/Nairobi",
+  "Europe/London",
+  "Europe/Paris",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "Asia/Tokyo",
+  "Australia/Sydney",
+];
+
+function timezoneOptions() {
+  try {
+    const supported = Intl.supportedValuesOf?.("timeZone") || [];
+    return [...new Set([DEFAULT_TIMEZONE, ...supported])];
+  } catch {
+    return FALLBACK_TIMEZONES;
+  }
+}
+
+const TIMEZONE_OPTIONS = timezoneOptions();
+
 function loadStoredLocation() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    return stored ? JSON.parse(stored) : null;
+    return stored ? normalizeLocation(JSON.parse(stored)) : null;
   } catch {
     return null;
   }
@@ -67,24 +98,87 @@ function buildMapsEmbedUrl(location, apiKey) {
   return `https://www.google.com/maps/embed/v1/view?${params.toString()}`;
 }
 
-function toLocalInputValue(date) {
-  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return localDate.toISOString().slice(0, 16);
+function normalizeLocation(location) {
+  if (!location) return null;
+  return {
+    ...location,
+    timezone: location.timezone || DEFAULT_TIMEZONE,
+  };
 }
 
-function formatTime(value) {
+function toUtcInputValue(date) {
+  return date.toISOString().slice(0, 16);
+}
+
+function utcInputToIso(value) {
+  if (!value) return "";
+  return new Date(`${value}:00Z`).toISOString();
+}
+
+function utcInputToMilliseconds(value) {
+  return Date.parse(`${value}:00Z`);
+}
+
+function formatUtcTime(value) {
   return new Date(value).toLocaleString([], {
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
   });
 }
 
+function formatZonedTime(date, timezone) {
+  try {
+    return new Intl.DateTimeFormat([], {
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+      timeZone: timezone || DEFAULT_TIMEZONE,
+      timeZoneName: "short",
+    }).format(date);
+  } catch {
+    return formatUtcTime(date);
+  }
+}
+
+function sourceKey(source) {
+  if (!source) return "";
+  const provider = source.provider || "builtin";
+  if (provider === "builtin") return `builtin:${source.name}`;
+  return `${provider}:${source.catalog || ""}:${source.name}:${source.ra}:${source.dec}`;
+}
+
+function sourceLabel(source) {
+  if (!source) return "";
+  return source.provider && source.provider !== "builtin"
+    ? `${source.name} (${source.provider})`
+    : source.name;
+}
+
+function sourceRequestPayload(source) {
+  if (!source) return {};
+  if ((source.provider || "builtin") === "builtin") {
+    return { source_name: source.name };
+  }
+  return {
+    source: {
+      name: source.name,
+      ra: source.ra,
+      dec: source.dec,
+      provider: source.provider,
+      catalog: source.catalog || "",
+    },
+  };
+}
+
 function hoursBetween(startValue, endValue) {
-  const start = new Date(startValue);
-  const end = new Date(endValue);
-  return (end.getTime() - start.getTime()) / 3600000;
+  return (utcInputToMilliseconds(endValue) - utcInputToMilliseconds(startValue)) / 3600000;
 }
 
 function defaultWindow() {
@@ -92,8 +186,8 @@ function defaultWindow() {
   start.setMinutes(Math.ceil(start.getMinutes() / 15) * 15, 0, 0);
   const end = new Date(start.getTime() + 2 * 3600000);
   return {
-    startTime: toLocalInputValue(start),
-    endTime: toLocalInputValue(end),
+    startTime: toUtcInputValue(start),
+    endTime: toUtcInputValue(end),
   };
 }
 
@@ -189,7 +283,7 @@ function ObservationChart({ planItems, loading }) {
     });
 
     return {
-      type: "scatter",
+      type: "line",
       data: { datasets },
       options: {
         responsive: true,
@@ -205,7 +299,7 @@ function ObservationChart({ planItems, loading }) {
           },
           tooltip: {
             callbacks: {
-              title: (items) => formatTime(items[0].raw.time || items[0].raw.x),
+              title: (items) => formatUtcTime(items[0].raw.time || items[0].raw.x),
               label: (context) => {
                 if (context.dataset.label === "Horizon") return "Horizon: 0.00 deg";
                 const point = context.raw;
@@ -220,7 +314,7 @@ function ObservationChart({ planItems, loading }) {
             title: { display: true, text: "Observation time" },
             grid: { color: "#e2e8f0" },
             ticks: {
-              callback: (value) => formatTime(Number(value)),
+              callback: (value) => formatUtcTime(Number(value)),
               maxRotation: 0,
               autoSkip: true,
             },
@@ -351,6 +445,21 @@ function LocationDialog({
               />
             </Field>
 
+            <Field label="Timezone">
+              <select
+                className={inputClass()}
+                value={draftLocation?.timezone || DEFAULT_TIMEZONE}
+                onChange={(event) => onLocationChange("timezone", event.target.value)}
+                required
+              >
+                {TIMEZONE_OPTIONS.map((timezone) => (
+                  <option key={timezone} value={timezone}>
+                    {timezone}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
             <Field label="Google Maps API key">
               <input
                 className={inputClass()}
@@ -405,7 +514,13 @@ function LocationDialog({
 export default function App() {
   const initialWindow = defaultWindow();
   const [sources, setSources] = useState([]);
-  const [selectedSource, setSelectedSource] = useState("");
+  const [catalogSources, setCatalogSources] = useState([]);
+  const [selectedSourceKey, setSelectedSourceKey] = useState("");
+  const [catalogProvider, setCatalogProvider] = useState("simbad");
+  const [catalogQuery, setCatalogQuery] = useState("");
+  const [catalogResults, setCatalogResults] = useState([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogMessage, setCatalogMessage] = useState("");
   const [startTime, setStartTime] = useState(initialWindow.startTime);
   const [endTime, setEndTime] = useState(initialWindow.endTime);
   const [stepMinutes, setStepMinutes] = useState(15);
@@ -418,6 +533,22 @@ export default function App() {
   const [planItems, setPlanItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [clockNow, setClockNow] = useState(() => new Date());
+
+  const allSources = useMemo(() => [...sources, ...catalogSources], [sources, catalogSources]);
+  const selectedSourceDetails = allSources.find(
+    (source) => sourceKey(source) === selectedSourceKey,
+  );
+  const plannedSourceKeys = new Set(planItems.map((item) => sourceKey(item.source)));
+  const selectedSourceAlreadyPlanned = selectedSourceDetails
+    ? plannedSourceKeys.has(sourceKey(selectedSourceDetails))
+    : false;
+  const totalPoints = planItems.reduce((total, item) => total + item.points.length, 0);
+  const visibleCount = planItems.filter((item) =>
+    item.points.some((point) => point.elevation >= 0),
+  ).length;
+  const windowHours = hoursBetween(startTime, endTime);
+  const locationTimezone = location?.timezone || DEFAULT_TIMEZONE;
 
   useEffect(() => {
     async function bootstrap() {
@@ -427,11 +558,15 @@ export default function App() {
           fetch("/api/location/default"),
         ]);
         const sourceJson = await sourceResponse.json();
-        const defaultLocation = await locationResponse.json();
+        const defaultLocation = normalizeLocation(await locationResponse.json());
         const storedLocation = loadStoredLocation();
+        const builtinSources = sourceJson.sources.map((source) => ({
+          ...source,
+          provider: "builtin",
+        }));
 
-        setSources(sourceJson.sources);
-        setSelectedSource(sourceJson.sources[0]?.name || "");
+        setSources(builtinSources);
+        setSelectedSourceKey(sourceKey(builtinSources[0]));
         if (!storedLocation) {
           setLocation(defaultLocation);
           setDraftLocation(defaultLocation);
@@ -445,7 +580,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!selectedSource || !location || !startTime) return;
+    const intervalId = window.setInterval(() => setClockNow(new Date()), 1000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedSourceDetails || !location || !startTime) return;
     let ignore = false;
 
     async function checkVisibility() {
@@ -456,9 +596,9 @@ export default function App() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            source_name: selectedSource,
+            ...sourceRequestPayload(selectedSourceDetails),
             location,
-            at_time: new Date(startTime).toISOString(),
+            at_time: utcInputToIso(startTime),
           }),
         });
         const nextVisibility = await response.json();
@@ -477,19 +617,74 @@ export default function App() {
     return () => {
       ignore = true;
     };
-  }, [selectedSource, startTime, location]);
+  }, [selectedSourceDetails, startTime, location]);
+
+  async function searchCatalog(event) {
+    event.preventDefault();
+    setError("");
+    setCatalogMessage("");
+    setCatalogResults([]);
+
+    const query = catalogQuery.trim();
+    if (!query) {
+      setCatalogMessage("Enter a catalog or source name to search.");
+      return;
+    }
+
+    setCatalogLoading(true);
+    try {
+      const response = await fetch("/api/catalog/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider: catalogProvider,
+          query,
+          row_limit: 8,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.detail || "Unable to search catalog.");
+      }
+      setCatalogResults(result.sources || []);
+      if (!result.sources?.length) {
+        setCatalogMessage(`No ${catalogProvider} source found for "${query}".`);
+      }
+    } catch (nextError) {
+      setCatalogMessage(nextError.message || "Unable to search catalog.");
+    } finally {
+      setCatalogLoading(false);
+    }
+  }
+
+  function selectCatalogSource(source) {
+    const nextSource = {
+      ...source,
+      provider: source.provider || catalogProvider,
+    };
+    const nextKey = sourceKey(nextSource);
+    setCatalogSources((current) =>
+      current.some((source) => sourceKey(source) === nextKey)
+        ? current
+        : [...current, nextSource],
+    );
+    setSelectedSourceKey(nextKey);
+    setCatalogResults([]);
+    setCatalogMessage(`${source.name} selected from ${source.provider || catalogProvider}.`);
+  }
 
   async function addObservation(event) {
     event.preventDefault();
     setError("");
 
     const durationHours = hoursBetween(startTime, endTime);
-    if (!selectedSource) {
+    if (!selectedSourceDetails) {
       setError("Select a source before adding an observation.");
       return;
     }
-    if (planItems.some((item) => item.source.name === selectedSource)) {
-      setError(`${selectedSource} is already in the observation plan.`);
+    const selectedKey = sourceKey(selectedSourceDetails);
+    if (planItems.some((item) => sourceKey(item.source) === selectedKey)) {
+      setError(`${selectedSourceDetails.name} is already in the observation plan.`);
       return;
     }
     if (!location) {
@@ -511,11 +706,11 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          source_name: selectedSource,
+          ...sourceRequestPayload(selectedSourceDetails),
           duration_hours: durationHours,
           step_minutes: Number(stepMinutes),
           location,
-          start_time: new Date(startTime).toISOString(),
+          start_time: utcInputToIso(startTime),
         }),
       });
       const trajectory = await response.json();
@@ -526,7 +721,7 @@ export default function App() {
       setPlanItems((current) => [
         ...current,
         {
-          id: `${selectedSource}-${Date.now()}`,
+          id: `${selectedKey}-${Date.now()}`,
           source: trajectory.source,
           startTime,
           endTime,
@@ -534,12 +729,11 @@ export default function App() {
           points: trajectory.points,
         },
       ]);
-      const nextSource = sources.find(
-        (source) =>
-          source.name !== selectedSource &&
-          !planItems.some((item) => item.source.name === source.name),
+      const plannedWithNewSource = new Set([...plannedSourceKeys, selectedKey]);
+      const nextSource = allSources.find(
+        (source) => !plannedWithNewSource.has(sourceKey(source)),
       );
-      if (nextSource) setSelectedSource(nextSource.name);
+      if (nextSource) setSelectedSourceKey(sourceKey(nextSource));
     } catch (nextError) {
       setError(nextError.message || "Unable to calculate trajectory.");
     } finally {
@@ -550,8 +744,8 @@ export default function App() {
   function removeObservation(id) {
     setPlanItems((current) => {
       const removed = current.find((item) => item.id === id);
-      if (removed && current.some((item) => item.source.name === selectedSource)) {
-        setSelectedSource(removed.source.name);
+      if (removed) {
+        setSelectedSourceKey(sourceKey(removed.source));
       }
       return current.filter((item) => item.id !== id);
     });
@@ -560,15 +754,17 @@ export default function App() {
   function updateDraftLocation(field, value) {
     setDraftLocation((current) => ({
       ...(current || {}),
-      [field]: field === "name" ? value : Number(value),
+      [field]: field === "name" || field === "timezone" ? value : Number(value),
     }));
   }
 
   function saveLocation(event) {
     event.preventDefault();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(draftLocation));
+    const nextLocation = normalizeLocation(draftLocation);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextLocation));
     localStorage.setItem(MAPS_API_KEY_STORAGE_KEY, mapApiKey);
-    setLocation(draftLocation);
+    setLocation(nextLocation);
+    setDraftLocation(nextLocation);
     setLocationDialogOpen(false);
     setPlanItems([]);
   }
@@ -576,7 +772,8 @@ export default function App() {
   function useDefaultLocation() {
     fetch("/api/location/default")
       .then((response) => response.json())
-      .then((defaultLocation) => {
+      .then((defaultLocationResponse) => {
+        const defaultLocation = normalizeLocation(defaultLocationResponse);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(defaultLocation));
         setDraftLocation(defaultLocation);
         setLocation(defaultLocation);
@@ -584,15 +781,6 @@ export default function App() {
       })
       .catch((nextError) => setError(nextError.message || "Unable to load default location."));
   }
-
-  const selectedSourceDetails = sources.find((source) => source.name === selectedSource);
-  const plannedSourceNames = new Set(planItems.map((item) => item.source.name));
-  const selectedSourceAlreadyPlanned = plannedSourceNames.has(selectedSource);
-  const totalPoints = planItems.reduce((total, item) => total + item.points.length, 0);
-  const visibleCount = planItems.filter((item) =>
-    item.points.some((point) => point.elevation >= 0),
-  ).length;
-  const windowHours = hoursBetween(startTime, endTime);
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950 antialiased">
@@ -620,6 +808,22 @@ export default function App() {
                 ? `${location.latitude}, ${location.longitude} at ${location.altitude} m`
                 : "Load or save a location"}
             </div>
+            {location && (
+              <div className="mt-3 grid gap-1 border-t border-slate-200 pt-3 text-xs">
+                <div className="flex justify-between gap-4">
+                  <span className="text-slate-500">Local time</span>
+                  <span className="font-medium text-slate-900">
+                    {formatZonedTime(clockNow, locationTimezone)}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-slate-500">UTC time</span>
+                  <span className="font-medium text-slate-900">
+                    {formatZonedTime(clockNow, DEFAULT_TIMEZONE)}
+                  </span>
+                </div>
+              </div>
+            )}
             <button
               type="button"
               className="mt-3 rounded-md bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800"
@@ -638,6 +842,82 @@ export default function App() {
         <aside className="space-y-5">
           <form
             className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+            onSubmit={searchCatalog}
+          >
+            <h2 className="text-base font-semibold text-slate-950">Search catalog</h2>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              Resolve a SIMBAD source or load selectable rows from a VizieR catalog.
+            </p>
+
+            <div className="mt-4 space-y-3">
+              <div className="grid grid-cols-[110px_1fr] gap-2">
+                <select
+                  className={inputClass()}
+                  value={catalogProvider}
+                  onChange={(event) => setCatalogProvider(event.target.value)}
+                >
+                  {CATALOG_PROVIDERS.map((provider) => (
+                    <option key={provider.value} value={provider.value}>
+                      {provider.label}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className={inputClass()}
+                  value={catalogQuery}
+                  onChange={(event) => setCatalogQuery(event.target.value)}
+                  placeholder={
+                    catalogProvider === "vizier"
+                      ? "VII/118/ngc2000"
+                      : "M31, 3C 273, NGC 253"
+                  }
+                />
+              </div>
+
+              <button
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                disabled={catalogLoading}
+              >
+                {catalogLoading ? "Searching..." : "Search source"}
+              </button>
+
+              {catalogMessage && (
+                <div className="rounded-md bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+                  {catalogMessage}
+                </div>
+              )}
+
+              {catalogResults.length > 0 && (
+                <div className="divide-y divide-slate-100 rounded-md border border-slate-200">
+                  {catalogResults.map((source) => {
+                    const key = sourceKey(source);
+                    const planned = plannedSourceKeys.has(key);
+                    return (
+                      <button
+                        type="button"
+                        key={key}
+                        className="block w-full px-3 py-2 text-left text-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50"
+                        disabled={planned}
+                        onClick={() => selectCatalogSource(source)}
+                      >
+                        <span className="block font-medium text-slate-950">
+                          {source.name}
+                        </span>
+                        <span className="block text-xs text-slate-500">
+                          {source.catalog || source.provider} / RA {source.ra} / Dec{" "}
+                          {source.dec}
+                          {planned ? " / planned" : ""}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </form>
+
+          <form
+            className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
             onSubmit={addObservation}
           >
             <div className="flex items-center justify-between gap-3">
@@ -648,6 +928,7 @@ export default function App() {
             {selectedSourceDetails && (
               <p className="mt-2 text-xs text-slate-500">
                 RA {selectedSourceDetails.ra} / Dec {selectedSourceDetails.dec}
+                {selectedSourceDetails.catalog ? ` / ${selectedSourceDetails.catalog}` : ""}
               </p>
             )}
 
@@ -655,24 +936,22 @@ export default function App() {
               <Field label="Source">
                 <select
                   className={inputClass()}
-                  value={selectedSource}
-                  onChange={(event) => setSelectedSource(event.target.value)}
+                  value={selectedSourceKey}
+                  onChange={(event) => setSelectedSourceKey(event.target.value)}
                 >
-                  {sources.map((source) => (
-                    <option
-                      key={source.name}
-                      value={source.name}
-                      disabled={plannedSourceNames.has(source.name)}
-                    >
-                      {plannedSourceNames.has(source.name)
-                        ? `${source.name} (planned)`
-                        : source.name}
-                    </option>
-                  ))}
+                  {allSources.map((source) => {
+                    const key = sourceKey(source);
+                    const planned = plannedSourceKeys.has(key);
+                    return (
+                      <option key={key} value={key} disabled={planned}>
+                        {planned ? `${sourceLabel(source)} (planned)` : sourceLabel(source)}
+                      </option>
+                    );
+                  })}
                 </select>
               </Field>
 
-              <Field label="Start time">
+              <Field label="Start time UTC">
                 <input
                   className={inputClass()}
                   type="datetime-local"
@@ -682,7 +961,7 @@ export default function App() {
                 />
               </Field>
 
-              <Field label="End time">
+              <Field label="End time UTC">
                 <input
                   className={inputClass()}
                   type="datetime-local"
@@ -706,10 +985,10 @@ export default function App() {
               <div className="rounded-md bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
                 {visibility
                   ? selectedSourceAlreadyPlanned
-                    ? `${selectedSource} is already in the plan. Remove it before adding a new window.`
+                    ? `${selectedSourceDetails.name} is already in the plan. Remove it before adding a new window.`
                     : `At the selected start time: ${visibility.elevation.toFixed(2)} deg elevation, ${visibility.azimuth.toFixed(2)} deg azimuth.`
                   : selectedSourceAlreadyPlanned
-                    ? `${selectedSource} is already in the plan.`
+                    ? `${selectedSourceDetails.name} is already in the plan.`
                     : "Select a source and start time to check visibility."}
               </div>
 
@@ -721,7 +1000,13 @@ export default function App() {
 
               <button
                 className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                disabled={loading || visibilityLoading || !location || selectedSourceAlreadyPlanned}
+                disabled={
+                  loading ||
+                  visibilityLoading ||
+                  !location ||
+                  !selectedSourceDetails ||
+                  selectedSourceAlreadyPlanned
+                }
               >
                 {loading
                   ? "Calculating..."
@@ -790,7 +1075,8 @@ export default function App() {
                         </span>
                       </div>
                       <div className="mt-1 text-sm text-slate-600">
-                        {formatTime(item.startTime)} to {formatTime(item.endTime)}
+                        {formatUtcTime(utcInputToIso(item.startTime))} to{" "}
+                        {formatUtcTime(utcInputToIso(item.endTime))}
                       </div>
                     </div>
                     <button
