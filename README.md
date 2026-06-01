@@ -4,6 +4,27 @@ A small FastAPI and React app for planning observations by plotting source eleva
 
 The original Tkinter app is still available as `whatsup.py`; the web rewrite is served by FastAPI from `backend/app/main.py`.
 
+Live app: [https://whatsup-mu.vercel.app](https://whatsup-mu.vercel.app)
+
+## Screenshots
+
+Observation planner with source elevation plots:
+
+![Observation planner with elevation plot](docs/screenshots/observation-planner.jpg)
+
+Location setup with timezone selection:
+
+![Observing location dialog](docs/screenshots/location-dialog.jpg)
+
+## Tech Stack
+
+- Frontend: React, Vite, Tailwind CSS, Chart.js
+- Backend: FastAPI on Python
+- Astronomy: Astropy, Astroplan, Astroquery
+- Data: built-in CSV source catalog, SIMBAD/VizieR catalog lookups, no database
+- Browser state: `localStorage` for observing location and Google Maps API key
+- Deployment: Vercel static output plus a Python FastAPI function
+
 ## Run
 
 Install Python dependencies:
@@ -56,6 +77,8 @@ The browser UI is a Vite React app using Tailwind CSS and Chart.js.
 
 The repo includes Vercel configuration for deploying the FastAPI app as a Python
 function and the React UI as static Vite output.
+
+Production deployment: [https://whatsup-mu.vercel.app](https://whatsup-mu.vercel.app)
 
 Vercel uses:
 
