@@ -1,9 +1,13 @@
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
 import astropy.units as u
-from astropy.coordinates import SkyCoord
+from astroplan import FixedTarget, Observer
+from astroplan.exceptions import TargetAlwaysUpWarning, TargetNeverUpWarning
+from astropy.coordinates import EarthLocation, FK5, SkyCoord
+from astropy.time import Time
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -26,6 +30,7 @@ FRONTEND_DIST_DIR = FRONTEND_DIR / "dist"
 app = FastAPI(title="WhatsUp Astronomy API")
 source_manager = SourceManager()
 CATALOG_TIMEOUT_SECONDS = 12
+RISE_SET_GRID_POINTS = 150
 
 
 class LocationPayload(BaseModel):
@@ -151,6 +156,122 @@ def _trajectory_from_source(
         location,
         start_time=start_time,
     )
+
+
+def _ensure_utc(timestamp: datetime) -> datetime:
+    if timestamp.tzinfo is None:
+        return timestamp.replace(tzinfo=timezone.utc)
+    return timestamp.astimezone(timezone.utc)
+
+
+def _iso_utc(timestamp: datetime | None) -> str | None:
+    if timestamp is None:
+        return None
+    return _ensure_utc(timestamp).isoformat()
+
+
+def _observer_for_location(location: ObserverLocation) -> Observer:
+    earth_location = EarthLocation.from_geodetic(
+        lat=location.latitude * u.deg,
+        lon=location.longitude * u.deg,
+        height=location.altitude * u.m,
+    )
+    return Observer(location=earth_location, name=location.name)
+
+
+def _target_for_source(source: SourcePayload) -> FixedTarget:
+    coordinates = SkyCoord(
+        source.ra.strip(),
+        source.dec.strip(),
+        frame=FK5(equinox=Time("J2000")),
+        unit=(u.hourangle, u.deg),
+    )
+    return FixedTarget(name=source.name, coord=coordinates)
+
+
+def _astropy_time_to_datetime(value) -> datetime | None:
+    if value is None or bool(getattr(value, "mask", False)):
+        return None
+    return _ensure_utc(value.to_datetime(timezone=timezone.utc))
+
+
+def _rise_set_time(
+    observer: Observer,
+    target: FixedTarget,
+    reference_time: datetime,
+    event: Literal["rise", "set"],
+    which: Literal["next", "previous"],
+) -> datetime | None:
+    method = observer.target_rise_time if event == "rise" else observer.target_set_time
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", TargetAlwaysUpWarning)
+        warnings.simplefilter("ignore", TargetNeverUpWarning)
+        value = method(
+            Time(reference_time),
+            target,
+            which=which,
+            horizon=0 * u.deg,
+            n_grid_points=RISE_SET_GRID_POINTS,
+        )
+    return _astropy_time_to_datetime(value)
+
+
+def _visibility_window(
+    source: SourcePayload,
+    location: ObserverLocation,
+    reference_time: datetime | None,
+) -> dict:
+    reference_time = _ensure_utc(reference_time or datetime.now(timezone.utc))
+    _, current_azimuth, current_elevation = _trajectory_from_source(
+        source,
+        1 / 60,
+        1,
+        location,
+        start_time=reference_time,
+    )
+    elevation_value = float(current_elevation[0])
+    azimuth_value = float(current_azimuth[0])
+    visible_now = elevation_value >= 0
+
+    observer = _observer_for_location(location)
+    target = _target_for_source(source)
+
+    if visible_now:
+        rise_time = _rise_set_time(observer, target, reference_time, "rise", "previous")
+        set_time = _rise_set_time(observer, target, reference_time, "set", "next")
+        visible_from = reference_time
+        visible_until = set_time
+        duration_kind = "remaining"
+    else:
+        rise_time = _rise_set_time(observer, target, reference_time, "rise", "next")
+        set_time = (
+            _rise_set_time(observer, target, rise_time, "set", "next")
+            if rise_time
+            else None
+        )
+        visible_from = rise_time
+        visible_until = set_time
+        duration_kind = "next_window"
+
+    visible_duration_seconds = (
+        max(0, (visible_until - visible_from).total_seconds())
+        if visible_from and visible_until
+        else None
+    )
+
+    return {
+        "status": "visible" if visible_now else "below horizon",
+        "reference_time": _iso_utc(reference_time),
+        "current_azimuth": azimuth_value,
+        "current_elevation": elevation_value,
+        "rise_time": _iso_utc(rise_time),
+        "set_time": _iso_utc(set_time),
+        "visible_from": _iso_utc(visible_from),
+        "visible_until": _iso_utc(visible_until),
+        "visible_duration_seconds": visible_duration_seconds,
+        "duration_kind": duration_kind,
+        "rise_set_method": "astroplan",
+    }
 
 
 def serialise_points(times, azimuth, elevation) -> list[dict]:
@@ -379,6 +500,7 @@ def trajectory(request: TrajectoryRequest):
             location,
             start_time=request.start_time,
         )
+        visibility_window = _visibility_window(source, location, request.start_time)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
 
@@ -387,6 +509,7 @@ def trajectory(request: TrajectoryRequest):
         "location": location_payload(location),
         "duration_hours": request.duration_hours,
         "step_minutes": request.step_minutes,
+        "visibility_window": visibility_window,
         "points": serialise_points(times, azimuth, elevation),
     }
 

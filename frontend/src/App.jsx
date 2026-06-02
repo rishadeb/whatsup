@@ -130,6 +130,41 @@ function formatUtcTime(value) {
   });
 }
 
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds)) return "";
+  const totalMinutes = Math.max(0, Math.round(seconds / 60));
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  const parts = [];
+  if (days) parts.push(`${days} d`);
+  if (hours) parts.push(`${hours} hr`);
+  if (minutes || !parts.length) parts.push(`${minutes} min`);
+  return parts.join(" ");
+}
+
+function visibilityRiseText(visibilityWindow) {
+  if (visibilityWindow?.rise_time) return formatUtcTime(visibilityWindow.rise_time);
+  if (visibilityWindow?.status === "visible") return "Already visible";
+  return "Not found in search";
+}
+
+function visibilitySetText(visibilityWindow) {
+  if (visibilityWindow?.set_time) return formatUtcTime(visibilityWindow.set_time);
+  return "Not found in search";
+}
+
+function visibilityDurationText(visibilityWindow) {
+  const seconds = visibilityWindow?.visible_duration_seconds;
+  if (Number.isFinite(seconds)) {
+    const suffix =
+      visibilityWindow.duration_kind === "remaining" ? " remaining" : " next window";
+    return `${formatDuration(seconds)}${suffix}`;
+  }
+  if (visibilityWindow?.status === "visible") return "No set found in search";
+  return "No visible window found";
+}
+
 function formatZonedTime(date, timezone) {
   try {
     return new Intl.DateTimeFormat([], {
@@ -725,7 +760,8 @@ export default function App() {
           source: trajectory.source,
           startTime,
           endTime,
-          status: visibility?.status || "not checked",
+          status: trajectory.visibility_window?.status || visibility?.status || "not checked",
+          visibilityWindow: trajectory.visibility_window,
           points: trajectory.points,
         },
       ]);
@@ -1078,6 +1114,24 @@ export default function App() {
                         {formatUtcTime(utcInputToIso(item.startTime))} to{" "}
                         {formatUtcTime(utcInputToIso(item.endTime))}
                       </div>
+                      {item.visibilityWindow && (
+                        <div className="mt-2 grid gap-1 text-xs text-slate-600 sm:grid-cols-3">
+                          <div>
+                            <span className="font-semibold text-slate-700">Rise:</span>{" "}
+                            {visibilityRiseText(item.visibilityWindow)}
+                          </div>
+                          <div>
+                            <span className="font-semibold text-slate-700">Set:</span>{" "}
+                            {visibilitySetText(item.visibilityWindow)}
+                          </div>
+                          <div>
+                            <span className="font-semibold text-slate-700">
+                              Time visible:
+                            </span>{" "}
+                            {visibilityDurationText(item.visibilityWindow)}
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <button
                       type="button"
