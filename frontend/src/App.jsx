@@ -568,6 +568,7 @@ export default function App() {
   const [planItems, setPlanItems] = useState([]);
   const [refreshingPlanItemIds, setRefreshingPlanItemIds] = useState(() => new Set());
   const [editablePlanItemIds, setEditablePlanItemIds] = useState(() => new Set());
+  const [draftPlanItemWindows, setDraftPlanItemWindows] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [clockNow, setClockNow] = useState(() => new Date());
@@ -787,19 +788,16 @@ export default function App() {
     const currentItem = planItems.find((item) => item.id === id);
     if (!currentItem) return;
 
-    const nextStartTime = field === "startTime" ? value : currentItem.startTime;
-    const nextEndTime = field === "endTime" ? value : currentItem.endTime;
-    setPlanItems((current) =>
-      current.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              startTime: nextStartTime,
-              endTime: nextEndTime,
-            }
-          : item,
-      ),
-    );
+    const currentWindow = draftPlanItemWindows[id] || currentItem;
+    const nextStartTime = field === "startTime" ? value : currentWindow.startTime;
+    const nextEndTime = field === "endTime" ? value : currentWindow.endTime;
+    setDraftPlanItemWindows((current) => ({
+      ...current,
+      [id]: {
+        startTime: nextStartTime,
+        endTime: nextEndTime,
+      },
+    }));
 
     if (!location) {
       setError("Save an observing location before updating an observation.");
@@ -854,6 +852,11 @@ export default function App() {
             : item,
         ),
       );
+      setDraftPlanItemWindows((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
     } catch (nextError) {
       if (planRefreshRequestIds.current[id] === requestId) {
         setError(nextError.message || "Unable to update trajectory.");
@@ -879,6 +882,13 @@ export default function App() {
       }
       return next;
     });
+    if (!enabled) {
+      setDraftPlanItemWindows((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+    }
   }
 
   function removeObservation(id) {
@@ -897,6 +907,11 @@ export default function App() {
     setRefreshingPlanItemIds((current) => {
       const next = new Set(current);
       next.delete(id);
+      return next;
+    });
+    setDraftPlanItemWindows((current) => {
+      const next = { ...current };
+      delete next[id];
       return next;
     });
     delete planRefreshRequestIds.current[id];
@@ -1206,6 +1221,7 @@ export default function App() {
                 {planItems.map((item, index) => {
                   const refreshing = refreshingPlanItemIds.has(item.id);
                   const editingTimes = editablePlanItemIds.has(item.id);
+                  const draftWindow = draftPlanItemWindows[item.id] || item;
                   return (
                     <div
                       key={item.id}
@@ -1255,7 +1271,7 @@ export default function App() {
                                 "disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500",
                               )}
                               type="datetime-local"
-                              value={item.startTime}
+                              value={draftWindow.startTime}
                               disabled={!editingTimes || refreshing}
                               onChange={(event) =>
                                 updateObservationWindow(
@@ -1273,7 +1289,7 @@ export default function App() {
                                 "disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500",
                               )}
                               type="datetime-local"
-                              value={item.endTime}
+                              value={draftWindow.endTime}
                               disabled={!editingTimes || refreshing}
                               onChange={(event) =>
                                 updateObservationWindow(
