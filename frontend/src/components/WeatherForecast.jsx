@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 
 const STORAGE_KEY = "whatsup.location";
+const DEFAULT_TIMEZONE = "UTC";
 
 const WEATHER_CODE_LABELS = {
   0: "Clear sky",
@@ -105,21 +106,31 @@ function loadStoredLocation() {
   }
 }
 
-function formatTime(iso) {
+function formatTime(iso, timezone) {
   if (!iso) return "";
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZoneName: "short",
-  });
+  try {
+    return new Intl.DateTimeFormat([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: timezone || DEFAULT_TIMEZONE,
+      timeZoneName: "short",
+    }).format(date);
+  } catch {
+    return date.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short",
+    });
+  }
 }
 
 export default function WeatherForecast({ location }) {
   const source = location || loadStoredLocation();
   const latitude = Number(source?.latitude);
   const longitude = Number(source?.longitude);
+  const timezone = source?.timezone || DEFAULT_TIMEZONE;
   const hasCoordinates = Number.isFinite(latitude) && Number.isFinite(longitude);
 
   const [forecast, setForecast] = useState(null);
@@ -140,7 +151,7 @@ export default function WeatherForecast({ location }) {
       `latitude=${encodeURIComponent(latitude.toFixed(4))}`,
       `longitude=${encodeURIComponent(longitude.toFixed(4))}`,
       `daily=${encodeURIComponent(DAILY_FIELDS)}`,
-      "timezone=auto",
+      `timezone=${encodeURIComponent(timezone)}`,
       "forecast_days=1",
     ].join("&");
     const url = `https://api.open-meteo.com/v1/forecast?${params}`;
@@ -168,7 +179,7 @@ export default function WeatherForecast({ location }) {
     return () => {
       ignore = true;
     };
-  }, [latitude, longitude, hasCoordinates]);
+  }, [latitude, longitude, timezone, hasCoordinates]);
 
   if (!hasCoordinates) return null;
 
@@ -186,13 +197,13 @@ export default function WeatherForecast({ location }) {
       ) : error ? (
         <div className="mt-2 text-xs text-red-700">{error}</div>
       ) : forecast ? (
-        <CompactForecast forecast={forecast} />
+        <CompactForecast forecast={forecast} timezone={timezone} />
       ) : null}
     </div>
   );
 }
 
-function CompactForecast({ forecast }) {
+function CompactForecast({ forecast, timezone }) {
   const daily = forecast.daily || {};
   const code = daily.weather_code?.[0];
   const maxTemp = daily.temperature_2m_max?.[0];
@@ -226,9 +237,9 @@ function CompactForecast({ forecast }) {
       {(sunrise || sunset) && (
         <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
           <Sunrise className="h-3.5 w-3.5" aria-hidden="true" />
-          <span>{formatTime(sunrise) || "—"}</span>
+          <span>{formatTime(sunrise, timezone) || "—"}</span>
           <Sunset className="ml-1 h-3.5 w-3.5" aria-hidden="true" />
-          <span>{formatTime(sunset) || "—"}</span>
+          <span>{formatTime(sunset, timezone) || "—"}</span>
         </div>
       )}
     </>
