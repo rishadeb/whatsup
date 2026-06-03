@@ -566,9 +566,13 @@ export default function App() {
   const [visibility, setVisibility] = useState(null);
   const [visibilityLoading, setVisibilityLoading] = useState(false);
   const [planItems, setPlanItems] = useState([]);
+  const [refreshingPlanItemIds, setRefreshingPlanItemIds] = useState(() => new Set());
+  const [editablePlanItemIds, setEditablePlanItemIds] = useState(() => new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [clockNow, setClockNow] = useState(() => new Date());
+  const planRefreshRequestIds = useRef({});
+  const planRefreshRequestSequence = useRef(0);
 
   const allSources = useMemo(() => [...sources, ...catalogSources], [sources, catalogSources]);
   const selectedSourceDetails = allSources.find(
@@ -777,6 +781,106 @@ export default function App() {
     }
   }
 
+  async function updateObservationWindow(id, field, value) {
+    setError("");
+
+    const currentItem = planItems.find((item) => item.id === id);
+    if (!currentItem) return;
+
+    const nextStartTime = field === "startTime" ? value : currentItem.startTime;
+    const nextEndTime = field === "endTime" ? value : currentItem.endTime;
+    setPlanItems((current) =>
+      current.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              startTime: nextStartTime,
+              endTime: nextEndTime,
+            }
+          : item,
+      ),
+    );
+
+    if (!location) {
+      setError("Save an observing location before updating an observation.");
+      return;
+    }
+
+    const durationHours = hoursBetween(nextStartTime, nextEndTime);
+    if (!Number.isFinite(durationHours) || durationHours <= 0) {
+      setError("End time must be after start time.");
+      return;
+    }
+    if (durationHours > 60) {
+      setError("Observation windows are limited to 60 hours in this version.");
+      return;
+    }
+
+    planRefreshRequestSequence.current += 1;
+    const requestId = planRefreshRequestSequence.current;
+    planRefreshRequestIds.current[id] = requestId;
+    setRefreshingPlanItemIds((current) => new Set(current).add(id));
+
+    try {
+      const response = await fetch("/api/trajectory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...sourceRequestPayload(currentItem.source),
+          duration_hours: durationHours,
+          step_minutes: Number(stepMinutes),
+          location,
+          start_time: utcInputToIso(nextStartTime),
+        }),
+      });
+      const trajectory = await response.json();
+      if (!response.ok) {
+        throw new Error(trajectory.detail || "Unable to update trajectory.");
+      }
+      if (planRefreshRequestIds.current[id] !== requestId) return;
+
+      setPlanItems((current) =>
+        current.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                source: trajectory.source,
+                startTime: nextStartTime,
+                endTime: nextEndTime,
+                status: trajectory.visibility_window?.status || "not checked",
+                visibilityWindow: trajectory.visibility_window,
+                points: trajectory.points,
+              }
+            : item,
+        ),
+      );
+    } catch (nextError) {
+      if (planRefreshRequestIds.current[id] === requestId) {
+        setError(nextError.message || "Unable to update trajectory.");
+      }
+    } finally {
+      if (planRefreshRequestIds.current[id] === requestId) {
+        setRefreshingPlanItemIds((current) => {
+          const next = new Set(current);
+          next.delete(id);
+          return next;
+        });
+      }
+    }
+  }
+
+  function toggleObservationWindowEditing(id, enabled) {
+    setEditablePlanItemIds((current) => {
+      const next = new Set(current);
+      if (enabled) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
+  }
+
   function removeObservation(id) {
     setPlanItems((current) => {
       const removed = current.find((item) => item.id === id);
@@ -785,6 +889,17 @@ export default function App() {
       }
       return current.filter((item) => item.id !== id);
     });
+    setEditablePlanItemIds((current) => {
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+    setRefreshingPlanItemIds((current) => {
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+    delete planRefreshRequestIds.current[id];
   }
 
   function updateDraftLocation(field, value) {
@@ -1075,7 +1190,10 @@ export default function App() {
             </div>
           )}
 
-          <ObservationChart planItems={planItems} loading={loading} />
+          <ObservationChart
+            planItems={planItems}
+            loading={loading || refreshingPlanItemIds.size > 0}
+          />
 
           <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 px-4 py-3">
@@ -1085,63 +1203,119 @@ export default function App() {
             </div>
             {planItems.length ? (
               <div className="divide-y divide-slate-100">
-                {planItems.map((item, index) => (
-                  <div
-                    key={item.id}
-                    className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className="h-2.5 w-2.5 rounded-full"
-                          style={{ backgroundColor: palette[index % palette.length] }}
-                        />
-                        <span className="font-medium text-slate-950">
-                          {item.source.name}
-                        </span>
-                        <span
-                          className={[
-                            "rounded-full px-2 py-0.5 text-xs font-semibold",
-                            item.status === "visible"
-                              ? "bg-emerald-50 text-emerald-700"
-                              : "bg-rose-50 text-rose-700",
-                          ].join(" ")}
-                        >
-                          {item.status}
-                        </span>
-                      </div>
-                      <div className="mt-1 text-sm text-slate-600">
-                        {formatUtcTime(utcInputToIso(item.startTime))} to{" "}
-                        {formatUtcTime(utcInputToIso(item.endTime))}
-                      </div>
-                      {item.visibilityWindow && (
-                        <div className="mt-2 grid gap-1 text-xs text-slate-600 sm:grid-cols-3">
-                          <div>
-                            <span className="font-semibold text-slate-700">Rise:</span>{" "}
-                            {visibilityRiseText(item.visibilityWindow)}
-                          </div>
-                          <div>
-                            <span className="font-semibold text-slate-700">Set:</span>{" "}
-                            {visibilitySetText(item.visibilityWindow)}
-                          </div>
-                          <div>
-                            <span className="font-semibold text-slate-700">
-                              Time visible:
-                            </span>{" "}
-                            {visibilityDurationText(item.visibilityWindow)}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    <button
-                      type="button"
-                      className="self-start rounded-md border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 sm:self-auto"
-                      onClick={() => removeObservation(item.id)}
+                {planItems.map((item, index) => {
+                  const refreshing = refreshingPlanItemIds.has(item.id);
+                  const editingTimes = editablePlanItemIds.has(item.id);
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
                     >
-                      Remove
-                    </button>
-                  </div>
-                ))}
+                      <div className="w-full">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className="h-2.5 w-2.5 rounded-full"
+                              style={{ backgroundColor: palette[index % palette.length] }}
+                            />
+                            <span className="font-medium text-slate-950">
+                              {item.source.name}
+                            </span>
+                            <span
+                              className={[
+                                "rounded-full px-2 py-0.5 text-xs font-semibold",
+                                item.status === "visible"
+                                  ? "bg-emerald-50 text-emerald-700"
+                                  : "bg-rose-50 text-rose-700",
+                              ].join(" ")}
+                            >
+                              {refreshing ? "updating" : item.status}
+                            </span>
+                          </div>
+                          <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                              checked={editingTimes}
+                              disabled={refreshing}
+                              onChange={(event) =>
+                                toggleObservationWindowEditing(
+                                  item.id,
+                                  event.target.checked,
+                                )
+                              }
+                            />
+                            Modify times
+                          </label>
+                        </div>
+                        <div className="mt-3 grid gap-3 text-sm text-slate-600 sm:grid-cols-2">
+                          <Field label="Start time UTC">
+                            <input
+                              className={inputClass(
+                                "disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500",
+                              )}
+                              type="datetime-local"
+                              value={item.startTime}
+                              disabled={!editingTimes || refreshing}
+                              onChange={(event) =>
+                                updateObservationWindow(
+                                  item.id,
+                                  "startTime",
+                                  event.target.value,
+                                )
+                              }
+                              required
+                            />
+                          </Field>
+                          <Field label="End time UTC">
+                            <input
+                              className={inputClass(
+                                "disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500",
+                              )}
+                              type="datetime-local"
+                              value={item.endTime}
+                              disabled={!editingTimes || refreshing}
+                              onChange={(event) =>
+                                updateObservationWindow(
+                                  item.id,
+                                  "endTime",
+                                  event.target.value,
+                                )
+                              }
+                              required
+                            />
+                          </Field>
+                        </div>
+                        {item.visibilityWindow && (
+                          <div className="mt-2 grid gap-1 text-xs text-slate-600 sm:grid-cols-3">
+                            <div>
+                              <span className="font-semibold text-slate-700">Rise:</span>{" "}
+                              {visibilityRiseText(item.visibilityWindow)}
+                            </div>
+                            <div>
+                              <span className="font-semibold text-slate-700">Set:</span>{" "}
+                              {visibilitySetText(item.visibilityWindow)}
+                            </div>
+                            <div>
+                              <span className="font-semibold text-slate-700">
+                                Time visible:
+                              </span>{" "}
+                              {visibilityDurationText(item.visibilityWindow)}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        className="self-start rounded-md border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400 sm:self-auto"
+                        disabled={refreshing}
+                        onClick={() => removeObservation(item.id)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <p className="px-4 py-6 text-sm text-slate-500">
