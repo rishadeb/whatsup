@@ -2,16 +2,35 @@ import os
 import tempfile
 from pathlib import Path
 
-ASTROPY_CACHE_DIR = Path(
-    os.environ.get("WHATSUP_CACHE_DIR", Path(tempfile.gettempdir()) / "whatsup-astropy-cache")
+ASTROPY_RUNTIME_DIR = Path(
+    os.environ.get("WHATSUP_RUNTIME_DIR", Path(tempfile.gettempdir()) / "whatsup-astropy")
 )
+ASTROPY_HOME_DIR = ASTROPY_RUNTIME_DIR / "home"
+ASTROPY_CACHE_DIR = Path(os.environ.get("WHATSUP_CACHE_DIR", ASTROPY_RUNTIME_DIR / "cache"))
+ASTROPY_CONFIG_DIR = Path(os.environ.get("WHATSUP_CONFIG_DIR", ASTROPY_RUNTIME_DIR / "config"))
+
+ASTROPY_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+ASTROPY_HOME_DIR.mkdir(parents=True, exist_ok=True)
 ASTROPY_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-os.environ.setdefault("XDG_CACHE_HOME", str(ASTROPY_CACHE_DIR))
+ASTROPY_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+
+try:
+    home_path = Path.home()
+    home_path.mkdir(parents=True, exist_ok=True)
+    test_path = home_path / ".whatsup-write-test"
+    test_path.write_text("", encoding="utf-8")
+    test_path.unlink()
+except OSError:
+    os.environ["HOME"] = str(ASTROPY_HOME_DIR)
+
+os.environ["XDG_CACHE_HOME"] = str(ASTROPY_CACHE_DIR)
+os.environ["XDG_CONFIG_HOME"] = str(ASTROPY_CONFIG_DIR)
+os.environ["ASTROPY_CACHE_DIR"] = str(ASTROPY_CACHE_DIR)
 
 import astropy.units as u
 
 from astroplan import Observer
-from astropy.config.paths import set_temp_cache
+from astropy.config.paths import set_temp_cache, set_temp_config
 from astropy.coordinates import SkyCoord, AltAz, EarthLocation, FK5
 from astropy.time import Time
 from astropy.utils import iers
@@ -28,6 +47,7 @@ from dataclasses import dataclass
 iers.conf.auto_download = False
 iers.conf.auto_max_age = None
 set_temp_cache(ASTROPY_CACHE_DIR, delete=False)
+set_temp_config(ASTROPY_CONFIG_DIR, delete=False)
 
 
 @dataclass

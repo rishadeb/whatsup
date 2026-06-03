@@ -3,17 +3,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-import astropy.units as u
-from astroplan import FixedTarget, Observer
-from astroplan.exceptions import TargetAlwaysUpWarning, TargetNeverUpWarning
-from astropy.coordinates import EarthLocation, FK5, SkyCoord
-from astropy.time import Time
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from source_manager import ObserverLocation, SourceManager
+
+import astropy.units as u
+from astroplan import Observer
+from astropy.coordinates import EarthLocation, FK5, SkyCoord
+from astropy.time import Time
 
 try:
     from astroquery.simbad import Simbad
@@ -179,14 +179,13 @@ def _observer_for_location(location: ObserverLocation) -> Observer:
     return Observer(location=earth_location, name=location.name)
 
 
-def _target_for_source(source: SourcePayload) -> FixedTarget:
-    coordinates = SkyCoord(
+def _target_for_source(source: SourcePayload) -> SkyCoord:
+    return SkyCoord(
         source.ra.strip(),
         source.dec.strip(),
         frame=FK5(equinox=Time("J2000")),
         unit=(u.hourangle, u.deg),
     )
-    return FixedTarget(name=source.name, coord=coordinates)
 
 
 def _astropy_time_to_datetime(value) -> datetime | None:
@@ -197,15 +196,18 @@ def _astropy_time_to_datetime(value) -> datetime | None:
 
 def _rise_set_time(
     observer: Observer,
-    target: FixedTarget,
+    target: SkyCoord,
     reference_time: datetime,
     event: Literal["rise", "set"],
     which: Literal["next", "previous"],
 ) -> datetime | None:
     method = observer.target_rise_time if event == "rise" else observer.target_set_time
     with warnings.catch_warnings():
-        warnings.simplefilter("ignore", TargetAlwaysUpWarning)
-        warnings.simplefilter("ignore", TargetNeverUpWarning)
+        warnings.filterwarnings(
+            "ignore",
+            message="Target .* does not cross horizon.*",
+            category=Warning,
+        )
         value = method(
             Time(reference_time),
             target,
