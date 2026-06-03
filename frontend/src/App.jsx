@@ -8,6 +8,7 @@ import {
   Tooltip,
   Legend,
 } from "chart.js";
+import WeatherForecast from "./components/WeatherForecast.jsx";
 
 Chart.register(LinearScale, LineController, LineElement, PointElement, Tooltip, Legend);
 
@@ -965,41 +966,44 @@ export default function App() {
             </p>
           </div>
 
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-            <div className="font-medium text-slate-950">
-              {location?.name || "No location selected"}
-            </div>
-            <div>
-              {location
-                ? `${location.latitude}, ${location.longitude} at ${location.altitude} m`
-                : "Load or save a location"}
-            </div>
-            {location && (
-              <div className="mt-3 grid gap-1 border-t border-slate-200 pt-3 text-xs">
-                <div className="flex justify-between gap-4">
-                  <span className="text-slate-500">Local time</span>
-                  <span className="font-medium text-slate-900">
-                    {formatZonedTime(clockNow, locationTimezone)}
-                  </span>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <span className="text-slate-500">UTC time</span>
-                  <span className="font-medium text-slate-900">
-                    {formatZonedTime(clockNow, DEFAULT_TIMEZONE)}
-                  </span>
-                </div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <div className="font-medium text-slate-950">
+                {location?.name || "No location selected"}
               </div>
-            )}
-            <button
-              type="button"
-              className="mt-3 rounded-md bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800"
-              onClick={() => {
-                setDraftLocation(location || draftLocation);
-                setLocationDialogOpen(true);
-              }}
-            >
-              Change location
-            </button>
+              <div>
+                {location
+                  ? `${location.latitude}, ${location.longitude} at ${location.altitude} m`
+                  : "Load or save a location"}
+              </div>
+              {location && (
+                <div className="mt-3 grid gap-1 border-t border-slate-200 pt-3 text-xs">
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">Local time</span>
+                    <span className="font-medium text-slate-900">
+                      {formatZonedTime(clockNow, locationTimezone)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">UTC time</span>
+                    <span className="font-medium text-slate-900">
+                      {formatZonedTime(clockNow, DEFAULT_TIMEZONE)}
+                    </span>
+                  </div>
+                </div>
+              )}
+              <button
+                type="button"
+                className="mt-3 rounded-md bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800"
+                onClick={() => {
+                  setDraftLocation(location || draftLocation);
+                  setLocationDialogOpen(true);
+                }}
+              >
+                Change location
+              </button>
+            </div>
+            <WeatherForecast location={location} />
           </div>
         </div>
       </section>
