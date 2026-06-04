@@ -8,6 +8,7 @@ import {
   Tooltip,
   Legend,
 } from "chart.js";
+import { ArrowDown, ArrowUp } from "lucide-react";
 import WeatherForecast from "./components/WeatherForecast.jsx";
 
 Chart.register(LinearScale, LineController, LineElement, PointElement, Tooltip, Legend);
@@ -153,6 +154,32 @@ function visibilityRiseText(visibilityWindow) {
 function visibilitySetText(visibilityWindow) {
   if (visibilityWindow?.set_time) return formatUtcTime(visibilityWindow.set_time);
   return "Not found in search";
+}
+
+function formatZonedTimeShort(iso, timezone) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  try {
+    return new Intl.DateTimeFormat([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: timezone || DEFAULT_TIMEZONE,
+    }).format(date);
+  } catch {
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+}
+
+function visibilityRiseShort(visibilityWindow, timezone) {
+  if (visibilityWindow?.rise_time) return formatZonedTimeShort(visibilityWindow.rise_time, timezone);
+  if (visibilityWindow?.status === "visible") return "above";
+  return "—";
+}
+
+function visibilitySetShort(visibilityWindow, timezone) {
+  if (visibilityWindow?.set_time) return formatZonedTimeShort(visibilityWindow.set_time, timezone);
+  return "—";
 }
 
 function visibilityDurationText(visibilityWindow) {
@@ -1090,9 +1117,33 @@ export default function App() {
             className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
             onSubmit={addObservation}
           >
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-base font-semibold text-slate-950">Add observation</h2>
-              <VisibilityBadge status={visibility} loading={visibilityLoading} />
+              <div className="flex flex-wrap items-center gap-3">
+                {!visibilityLoading && visibility && (
+                  <div className="flex items-center gap-3 text-xs text-slate-600">
+                    <span className="inline-flex items-center gap-1" title="Rise time">
+                      <ArrowUp
+                        className="h-3 w-3 text-slate-500"
+                        aria-hidden="true"
+                      />
+                      <span className="font-medium text-slate-900">
+                        {visibilityRiseShort(visibility, locationTimezone)}
+                      </span>
+                    </span>
+                    <span className="inline-flex items-center gap-1" title="Set time">
+                      <ArrowDown
+                        className="h-3 w-3 text-slate-500"
+                        aria-hidden="true"
+                      />
+                      <span className="font-medium text-slate-900">
+                        {visibilitySetShort(visibility, locationTimezone)}
+                      </span>
+                    </span>
+                  </div>
+                )}
+                <VisibilityBadge status={visibility} loading={visibilityLoading} />
+              </div>
             </div>
 
             {selectedSourceDetails && (
