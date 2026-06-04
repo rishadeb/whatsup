@@ -522,27 +522,20 @@ def visibility(request: VisibilityRequest):
     source = _selected_source(request)
 
     try:
-        times, azimuth, elevation = _trajectory_from_source(
-            source,
-            1 / 60,
-            1,
-            location,
-            start_time=request.at_time,
-        )
+        visibility_window = _visibility_window(source, location, request.at_time)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
 
-    elevation_value = float(elevation[0])
     return {
         "source": source_payload(source),
-        "time": (
-            times[0].replace(tzinfo=timezone.utc)
-            if times[0].tzinfo is None
-            else times[0]
-        ).isoformat(),
-        "azimuth": float(azimuth[0]),
-        "elevation": elevation_value,
-        "status": "visible" if elevation_value >= 0 else "below horizon",
+        "time": visibility_window["reference_time"],
+        "azimuth": visibility_window["current_azimuth"],
+        "elevation": visibility_window["current_elevation"],
+        "status": visibility_window["status"],
+        "rise_time": visibility_window["rise_time"],
+        "set_time": visibility_window["set_time"],
+        "visible_duration_seconds": visibility_window["visible_duration_seconds"],
+        "duration_kind": visibility_window["duration_kind"],
     }
 
 
