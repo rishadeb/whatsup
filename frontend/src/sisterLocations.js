@@ -17,11 +17,11 @@ export const SISTER_LOCATION_PRESETS = [
     altitude: 2124,
   },
   {
-    id: "alma",
-    name: "ALMA",
-    latitude: -23.029,
-    longitude: -67.755,
-    altitude: 5050,
+    id: "hartrao",
+    name: "HartRAO",
+    latitude: -25.8897,
+    longitude: 27.6854,
+    altitude: 1415,
   },
   {
     id: "effelsberg",
@@ -101,7 +101,20 @@ export function loadSisterLocations(storage = globalThis.localStorage) {
   try {
     const parsed = JSON.parse(storage.getItem(SISTER_LOCATIONS_STORAGE_KEY));
     if (validateSisterLocations(parsed).length) throw new Error("Invalid stored locations");
-    return normaliseSisterLocations(parsed);
+    const migrated = parsed.map((location) =>
+      location.id === "alma" &&
+      location.name === "ALMA" &&
+      Number(location.latitude) === -23.029 &&
+      Number(location.longitude) === -67.755 &&
+      Number(location.altitude) === 5050
+        ? { ...SISTER_LOCATION_PRESETS.find((preset) => preset.id === "hartrao") }
+        : location,
+    );
+    const normalised = normaliseSisterLocations(migrated);
+    if (migrated.some((location, index) => location !== parsed[index])) {
+      storage.setItem(SISTER_LOCATIONS_STORAGE_KEY, JSON.stringify(normalised));
+    }
+    return normalised;
   } catch {
     return SISTER_LOCATION_PRESETS.map((location) => ({ ...location }));
   }

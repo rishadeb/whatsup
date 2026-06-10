@@ -81,7 +81,7 @@ hourly samples, displays a compact current-weather summary for each site, and st
 editable location list in browser `localStorage` under
 `whatsup.sisterLocations.v1`.
 
-First-time users receive five global radio-observatory presets: MeerKAT, VLA, ALMA,
+First-time users receive five global radio-observatory presets: MeerKAT, VLA, HartRAO,
 Effelsberg, and Parkes / Murriyang.
 
 ## Deploy to Vercel

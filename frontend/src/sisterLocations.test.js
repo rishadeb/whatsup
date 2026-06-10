@@ -44,6 +44,23 @@ test("invalid storage falls back to presets", () => {
   assert.equal(locations.length, SISTER_LOCATION_PRESETS.length);
 });
 
+test("the original ALMA preset migrates to HartRAO", () => {
+  const storage = storageWith(
+    JSON.stringify([
+      { id: "alma", name: "ALMA", latitude: -23.029, longitude: -67.755, altitude: 5050 },
+    ]),
+  );
+  assert.deepEqual(loadSisterLocations(storage), [
+    {
+      id: "hartrao",
+      name: "HartRAO",
+      latitude: -25.8897,
+      longitude: 27.6854,
+      altitude: 1415,
+    },
+  ]);
+});
+
 test("validation enforces coordinates and the maximum", () => {
   const tooMany = Array.from({ length: MAX_SISTER_LOCATIONS + 1 }, (_, index) => ({
     id: String(index),
