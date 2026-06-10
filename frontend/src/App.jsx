@@ -8,7 +8,7 @@ import {
   Tooltip,
   Legend,
 } from "chart.js";
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowUp, Star } from "lucide-react";
 import SisterLocations from "./components/SisterLocations.jsx";
 import WeatherForecast from "./components/WeatherForecast.jsx";
 
@@ -16,6 +16,7 @@ Chart.register(LinearScale, LineController, LineElement, PointElement, Tooltip, 
 
 const STORAGE_KEY = "whatsup.location";
 const MAPS_API_KEY_STORAGE_KEY = "whatsup.googleMapsApiKey";
+const GITHUB_REPOSITORY_URL = "https://github.com/rishadeb/whatsup";
 const palette = [
   "#2563eb",
   "#059669",
@@ -273,6 +274,19 @@ function Field({ label, children }) {
   );
 }
 
+function GithubMark({ className }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <path d="M12 2C6.48 2 2 6.58 2 12.23c0 4.52 2.87 8.35 6.84 9.71.5.1.68-.22.68-.49 0-.24-.01-1.05-.01-1.9-2.78.62-3.37-1.2-3.37-1.2-.45-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05A9.3 9.3 0 0 1 12 6.96a9.3 9.3 0 0 1 2.5.35c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.93-2.34 4.8-4.57 5.05.36.32.68.94.68 1.9 0 1.37-.01 2.47-.01 2.8 0 .27.18.59.69.49A10.25 10.25 0 0 0 22 12.23C22 6.58 17.52 2 12 2Z" />
+    </svg>
+  );
+}
+
 function AppNavigation({ currentPath, onNavigate }) {
   const items = [
     { path: "/", label: "Observation planner" },
@@ -280,27 +294,52 @@ function AppNavigation({ currentPath, onNavigate }) {
   ];
 
   return (
-    <nav className="flex flex-wrap gap-2" aria-label="Primary navigation">
-      {items.map((item) => {
-        const active = currentPath === item.path;
-        return (
-          <button
-            type="button"
-            key={item.path}
-            className={[
-              "rounded-md px-3 py-2 text-sm font-semibold transition",
-              active
-                ? "bg-slate-950 text-white"
-                : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
-            ].join(" ")}
-            aria-current={active ? "page" : undefined}
-            onClick={() => onNavigate(item.path)}
-          >
-            {item.label}
-          </button>
-        );
-      })}
-    </nav>
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <nav className="flex flex-wrap gap-2" aria-label="Primary navigation">
+        {items.map((item) => {
+          const active = currentPath === item.path;
+          return (
+            <button
+              type="button"
+              key={item.path}
+              className={[
+                "rounded-md px-3 py-2 text-sm font-semibold transition",
+                active
+                  ? "bg-slate-950 text-white"
+                  : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
+              ].join(" ")}
+              aria-current={active ? "page" : undefined}
+              onClick={() => onNavigate(item.path)}
+            >
+              {item.label}
+            </button>
+          );
+        })}
+      </nav>
+      <div className="flex items-center gap-2">
+        <a
+          className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50 hover:text-slate-950"
+          href={GITHUB_REPOSITORY_URL}
+          target="_blank"
+          rel="noreferrer"
+          aria-label="View WhatsUp on GitHub"
+          title="View repository"
+        >
+          <GithubMark className="h-4 w-4" />
+        </a>
+        <a
+          className="inline-flex h-9 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800"
+          href={GITHUB_REPOSITORY_URL}
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Star WhatsUp on GitHub"
+          title="Open GitHub to star the repository"
+        >
+          <Star className="h-4 w-4" />
+          <span>Star</span>
+        </a>
+      </div>
+    </div>
   );
 }
 
