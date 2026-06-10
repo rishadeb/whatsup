@@ -9,6 +9,7 @@ import {
   Legend,
 } from "chart.js";
 import { ArrowDown, ArrowUp } from "lucide-react";
+import SisterLocations from "./components/SisterLocations.jsx";
 import WeatherForecast from "./components/WeatherForecast.jsx";
 
 Chart.register(LinearScale, LineController, LineElement, PointElement, Tooltip, Legend);
@@ -269,6 +270,37 @@ function Field({ label, children }) {
       {label}
       <div className="mt-1">{children}</div>
     </label>
+  );
+}
+
+function AppNavigation({ currentPath, onNavigate }) {
+  const items = [
+    { path: "/", label: "Observation planner" },
+    { path: "/sister-locations", label: "Sister locations" },
+  ];
+
+  return (
+    <nav className="flex flex-wrap gap-2" aria-label="Primary navigation">
+      {items.map((item) => {
+        const active = currentPath === item.path;
+        return (
+          <button
+            type="button"
+            key={item.path}
+            className={[
+              "rounded-md px-3 py-2 text-sm font-semibold transition",
+              active
+                ? "bg-slate-950 text-white"
+                : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-50",
+            ].join(" ")}
+            aria-current={active ? "page" : undefined}
+            onClick={() => onNavigate(item.path)}
+          >
+            {item.label}
+          </button>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -600,6 +632,9 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [clockNow, setClockNow] = useState(() => new Date());
+  const [currentPath, setCurrentPath] = useState(() =>
+    window.location.pathname === "/sister-locations" ? "/sister-locations" : "/",
+  );
   const planRefreshRequestIds = useRef({});
   const planRefreshRequestSequence = useRef(0);
 
@@ -653,7 +688,24 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!selectedSourceDetails || !location || !startTime) return;
+    function handlePopState() {
+      setCurrentPath(
+        window.location.pathname === "/sister-locations" ? "/sister-locations" : "/",
+      );
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    if (
+      currentPath === "/sister-locations" ||
+      !selectedSourceDetails ||
+      !location ||
+      !startTime
+    ) {
+      return;
+    }
     let ignore = false;
 
     async function checkVisibility() {
@@ -685,7 +737,7 @@ export default function App() {
     return () => {
       ignore = true;
     };
-  }, [selectedSourceDetails, startTime, location]);
+  }, [selectedSourceDetails, startTime, location, currentPath]);
 
   async function searchCatalog(event) {
     event.preventDefault();
@@ -976,61 +1028,86 @@ export default function App() {
       .catch((nextError) => setError(nextError.message || "Unable to load default location."));
   }
 
+  function navigate(path) {
+    if (path === currentPath) return;
+    window.history.pushState({}, "", path);
+    setCurrentPath(path);
+  }
+
+  const navigation = (
+    <AppNavigation currentPath={currentPath} onNavigate={navigate} />
+  );
+
+  if (currentPath === "/sister-locations") {
+    return (
+      <SisterLocations
+        allSources={allSources}
+        selectedSourceKey={selectedSourceKey}
+        selectedSource={selectedSourceDetails}
+        onSelectedSourceChange={setSelectedSourceKey}
+        navigation={navigation}
+      />
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950 antialiased">
       <section className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-col gap-6 px-5 py-6 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-wide text-blue-700">
-              WhatsUp
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
-              Observation planner
-            </h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-              Build a source-by-source observing plan and compare elevation windows from
-              the browser&apos;s saved location.
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
-            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-              <div className="font-medium text-slate-950">
-                {location?.name || "No location selected"}
-              </div>
-              <div>
-                {location
-                  ? `${location.latitude}, ${location.longitude} at ${location.altitude} m`
-                  : "Load or save a location"}
-              </div>
-              {location && (
-                <div className="mt-3 grid gap-1 border-t border-slate-200 pt-3 text-xs">
-                  <div className="flex justify-between gap-4">
-                    <span className="text-slate-500">Local time</span>
-                    <span className="font-medium text-slate-900">
-                      {formatZonedTime(clockNow, locationTimezone)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between gap-4">
-                    <span className="text-slate-500">UTC time</span>
-                    <span className="font-medium text-slate-900">
-                      {formatZonedTime(clockNow, DEFAULT_TIMEZONE)}
-                    </span>
-                  </div>
-                </div>
-              )}
-              <button
-                type="button"
-                className="mt-3 rounded-md bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800"
-                onClick={() => {
-                  setDraftLocation(location || draftLocation);
-                  setLocationDialogOpen(true);
-                }}
-              >
-                Change location
-              </button>
+        <div className="mx-auto max-w-7xl px-5 py-6">
+          {navigation}
+          <div className="mt-6 flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-wide text-blue-700">
+                WhatsUp
+              </p>
+              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
+                Observation planner
+              </h1>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                Build a source-by-source observing plan and compare elevation windows from
+                the browser&apos;s saved location.
+              </p>
             </div>
-            <WeatherForecast location={location} />
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                <div className="font-medium text-slate-950">
+                  {location?.name || "No location selected"}
+                </div>
+                <div>
+                  {location
+                    ? `${location.latitude}, ${location.longitude} at ${location.altitude} m`
+                    : "Load or save a location"}
+                </div>
+                {location && (
+                  <div className="mt-3 grid gap-1 border-t border-slate-200 pt-3 text-xs">
+                    <div className="flex justify-between gap-4">
+                      <span className="text-slate-500">Local time</span>
+                      <span className="font-medium text-slate-900">
+                        {formatZonedTime(clockNow, locationTimezone)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <span className="text-slate-500">UTC time</span>
+                      <span className="font-medium text-slate-900">
+                        {formatZonedTime(clockNow, DEFAULT_TIMEZONE)}
+                      </span>
+                    </div>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="mt-3 rounded-md bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800"
+                  onClick={() => {
+                    setDraftLocation(location || draftLocation);
+                    setLocationDialogOpen(true);
+                  }}
+                >
+                  Change location
+                </button>
+              </div>
+              <WeatherForecast location={location} />
+            </div>
           </div>
         </div>
       </section>

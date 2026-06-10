@@ -80,6 +80,13 @@ class AllTrajectoriesRequest(BaseModel):
     start_time: datetime | None = None
 
 
+class SisterTrajectoriesRequest(BaseModel):
+    source_name: str | None = None
+    source: SourcePayload | None = None
+    locations: list[LocationPayload] = Field(min_length=1, max_length=6)
+    start_time: datetime | None = None
+
+
 class VisibilityRequest(BaseModel):
     source_name: str | None = None
     source: SourcePayload | None = None
@@ -120,7 +127,9 @@ def _builtin_source_payload(source_name: str) -> SourcePayload:
     return SourcePayload(name=source_name, ra=ra, dec=dec, provider="builtin")
 
 
-def _selected_source(request: TrajectoryRequest | VisibilityRequest) -> SourcePayload:
+def _selected_source(
+    request: TrajectoryRequest | SisterTrajectoriesRequest | VisibilityRequest,
+) -> SourcePayload:
     if request.source is not None:
         return request.source
     if request.source_name:
@@ -516,6 +525,50 @@ def trajectory(request: TrajectoryRequest):
     }
 
 
+@app.post("/api/sister-trajectories")
+def sister_trajectories(request: SisterTrajectoriesRequest):
+    source = _selected_source(request)
+    datasets = []
+    errors = []
+
+    for index, location_request in enumerate(request.locations):
+        location = location_request.to_observer_location()
+        try:
+            # The shared trajectory helper samples [start, end), so requesting 13
+            # hours produces the required hourly points from hour 0 through hour 12.
+            times, azimuth, elevation = _trajectory_from_source(
+                source,
+                13,
+                60,
+                location,
+                start_time=request.start_time,
+            )
+            datasets.append(
+                {
+                    "index": index,
+                    "location": location_payload(location),
+                    "points": serialise_points(times, azimuth, elevation),
+                }
+            )
+        except Exception as error:
+            errors.append(
+                {
+                    "index": index,
+                    "location": location_payload(location),
+                    "detail": str(error) or "Unable to calculate trajectory.",
+                }
+            )
+
+    return {
+        "source": source_payload(source),
+        "start_time": _iso_utc(request.start_time),
+        "duration_hours": 12,
+        "step_minutes": 60,
+        "datasets": datasets,
+        "errors": errors,
+    }
+
+
 @app.post("/api/visibility")
 def visibility(request: VisibilityRequest):
     location = request_location(request.location)
@@ -572,3 +625,13 @@ def trajectories(request: AllTrajectoriesRequest):
 
 if (FRONTEND_DIST_DIR / "assets").exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST_DIR / "assets"), name="assets")
+
+
+@app.get("/{full_path:path}")
+def spa_fallback(full_path: str):
+    if full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not found")
+    index_path = FRONTEND_DIST_DIR / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
+    return FileResponse(FRONTEND_DIR / "index.html")

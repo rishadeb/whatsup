@@ -73,6 +73,17 @@ http://127.0.0.1:8000/
 
 The browser UI is a Vite React app using Tailwind CSS and Chart.js.
 
+## Sister locations
+
+Open `/sister-locations` or use the `Sister locations` navigation button to compare the
+selected source at up to six observing sites. The page uses a fixed 12-hour window with
+hourly samples, displays a compact current-weather summary for each site, and stores the
+editable location list in browser `localStorage` under
+`whatsup.sisterLocations.v1`.
+
+First-time users receive five global radio-observatory presets: MeerKAT, VLA, ALMA,
+Effelsberg, and Parkes / Murriyang.
+
 ## Deploy to Vercel
 
 The repo includes Vercel configuration for deploying the FastAPI app as a Python
@@ -171,5 +182,25 @@ Content-Type: application/json
     "longitude": -0.304974,
     "altitude": 116
   }
+}
+```
+
+Compare one source across sister locations:
+
+```http
+POST /api/sister-trajectories
+Content-Type: application/json
+
+{
+  "source_name": "3c48",
+  "start_time": "2026-06-10T16:00:00Z",
+  "locations": [
+    {
+      "name": "MeerKAT",
+      "latitude": -30.713,
+      "longitude": 21.443,
+      "altitude": 1086
+    }
+  ]
 }
 ```
