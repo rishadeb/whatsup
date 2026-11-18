@@ -17,9 +17,11 @@ from astropy.time import Time
 
 try:
     from astroquery.simbad import Simbad
+    from astroquery.simbad import conf as simbad_conf
     from astroquery.vizier import Vizier
 except ImportError:
     Simbad = None
+    simbad_conf = None
     Vizier = None
 
 
@@ -31,6 +33,12 @@ app = FastAPI(title="WhatsUp Astronomy API")
 source_manager = SourceManager()
 CATALOG_TIMEOUT_SECONDS = 12
 RISE_SET_GRID_POINTS = 150
+SIMBAD_SERVER = "simbad.idia.ac.za"
+VIZIER_SERVER = "vizier.idia.ac.za"
+
+# SIMBAD only accepts mirrors registered in its config, so add the IDIA mirror.
+if simbad_conf is not None and SIMBAD_SERVER not in simbad_conf.servers_list:
+    simbad_conf.servers_list.append(SIMBAD_SERVER)
 
 
 class LocationPayload(BaseModel):
@@ -377,7 +385,11 @@ def _simbad_results(query: str) -> list[dict]:
     if Simbad is None:
         raise HTTPException(status_code=503, detail="astroquery is not installed.")
 
-    simbad = Simbad(timeout=CATALOG_TIMEOUT_SECONDS)
+    simbad = Simbad()
+    # The timeout is validated against the active mirror's TAP capabilities,
+    # so point at the mirror before setting it.
+    simbad.server = SIMBAD_SERVER
+    simbad.timeout = CATALOG_TIMEOUT_SECONDS
     table = simbad.query_object(query)
     if table is None or len(table) == 0:
         return []
@@ -421,7 +433,12 @@ def _vizier_results(query: str, row_limit: int) -> list[dict]:
     if Vizier is None:
         raise HTTPException(status_code=503, detail="astroquery is not installed.")
 
-    vizier = Vizier(columns=["**"], row_limit=row_limit, timeout=CATALOG_TIMEOUT_SECONDS)
+    vizier = Vizier(
+        columns=["**"],
+        row_limit=row_limit,
+        timeout=CATALOG_TIMEOUT_SECONDS,
+        vizier_server=VIZIER_SERVER,
+    )
     tables = vizier.get_catalogs(query)
 
     results = []
